@@ -11,3 +11,6 @@ _tmp*/
 # paths belong, never this file.
 cordis.local.yml
 .env
+
+# GCM diagnose writes username/hostname into the cwd - never commit it
+gcm-diagnose.log
