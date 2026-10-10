@@ -1,0 +1,209 @@
+# dsh-memory-tree — bundle patch
+#
+# Inserted into the desktop profile's composition tree. The row lives at the
+# profile ROOT on purpose: an unscoped context registers its tools into the
+# tools registry's GLOBAL layer, which is the layer every agent scope inherits,
+# so one row serves every session regardless of which agent preset it runs.
+#
+# Equally important: an UNTAGGED listener is admitted to scope-filtered event
+# dispatch globally (dsh-scope's `scopeTarget`), which is what lets this
+# profile-level plugin observe `agent/pre-step` / `agent/turn-stopping` for
+# every agent. A listener tagged BELOW the dispatch key would never see them.
+#
+# Install (from a shell that can reach the packaged dsh CLI):
+#   dsh plugin add link:<PLUGIN_DIR>
+# then restart DSH Desktop so the loader rebuilds the composition.
+#
+# Every key below is a default the plugin also enforces in code; the profile's
+# own cordis.patch.yml can override any of them by row id.
+- insert:
+    - id: memory-tree
+      name: dsh-memory-tree
+      config:
+        # The tree root. Everything below is created lazily under this path.
+        # Leave it UNSET to use the platform default (lib/paths.js DEFAULT_ROOT:
+        # `<homedir>/DSHMemory`). An absolute path here overrides it — and a
+        # Windows-shaped root on a POSIX host is a load-time error ON PURPOSE
+        # (see assertRootForPlatform in lib/paths.js).
+        # root: /srv/DSHMemory
+        timezone: Asia/Shanghai
+
+        # Master switch. false disables triggers and tool side effects.
+        enabled: true
+        # Append one mechanical line per turn (no model call).
+        turnLog: true
+
+        # Context pressure that triggers a snapshot, as a fraction of the routed
+        # model's own context window. The harness compacts at ~80% of the window,
+        # so 0.5 leaves ~30% as headroom to summarize before the context is
+        # pruned — and it scales by itself when the window is not 1M.
+        snapshotTriggerRatio: 0.5
+        # Absolute value used while the window is not yet known (before the first
+        # `request/context` event), and as a FLOOR so that a small-window route
+        # cannot make the trigger fire almost immediately.
+        snapshotTriggerTokens: 500000
+        # How far the context must GROW beyond the last snapshot before pressure
+        # fires again. Without this the pressure test is a STATE test, and a state
+        # a snapshot cannot change stays true forever: measured live at 22
+        # snapshots in 25 minutes, each costing two model calls. This is the event
+        # side of the same rule.
+        snapshotGrowthTokens: 100000
+        # Floor between two AUTOMATIC snapshots of one session. This is a RATE
+        # LIMIT, not the thing that stops repetition: it only slows a repeating
+        # trigger to one snapshot per interval, which is still unbounded over
+        # time. `snapshotGrowthTokens` is what actually ends the repetition.
+        # `compaction` and `manual` bypass this floor on purpose: both are hard
+        # boundaries, and compaction detection is incremental (one schedule per
+        # real compaction event), so nothing can storm.
+        minSnapshotIntervalMs: 60000
+        # Snapshot when a compaction happens. Detected from the durable
+        # `compaction/start` event the harness appends BEFORE it replaces the
+        # surface, with the surface generation as a secondary signal.
+        compactionTrigger: true
+        # Also snapshot every N turns. 0 = disabled.
+        snapshotOnTurns: 0
+
+        # Verbatim slice budget per snapshot. This is the AUTHORITATIVE layer,
+        # taken from the append-only session log that compaction never removes
+        # events from — so this is a safety valve against a pathological file,
+        # not a per-session limit, and each snapshot only covers events since
+        # the previous one.
+        maxSliceBytes: 4194304
+        # What the day-summary call is SHOWN (head + tail; the middle is dropped
+        # when a slice is longer). Snapshot completeness is unaffected.
+        maxInputChars: 120000
+        # Output budget per summary call. Generous on purpose: this route is a
+        # REASONING model, so its thinking is charged against the same budget as
+        # the answer. At 3000 a long think consumed the lot and the call ended
+        # with `finish: max-tokens` and no text — the day simply got no summary,
+        # with only a W line in the log to show for it. The answer itself needs a
+        # few hundred tokens; the rest is headroom for reasoning.
+        maxTokens: 8000
+        timeoutMs: 180000
+
+        # Refresh the day's own line plus month/year/long-term gists on each
+        # snapshot (call 2). The DAY line is produced here rather than by call 1
+        # because it is a compression of the whole day's entry log, which is
+        # permanent — not a rewrite of the model's previous answer, which is what
+        # used to collapse all four levels onto whatever happened most recently.
+        # false costs every level above the day.
+        rollup: true
+
+        # The day's entry list is append-only, so a runaway model cannot erase a
+        # day — but it could still bury one. These bound what ONE snapshot may
+        # contribute: at most this many new entries, each at most this many
+        # characters. Entries beyond the cap are dropped and counted in the
+        # snapshot report as `dropped`.
+        # 4 was too tight: the first live run after the rewrite had a 389-event
+        # slice produce six legitimate entries and dropped two of them. The cap
+        # guards against a runaway answer; it does not ration a busy day.
+        dayEntryMax: 8
+        dayEntryChars: 400
+        # How many recent entries are shown to the entry call so it can avoid
+        # repeating what is already recorded. One line each, so this is cheap.
+        dayEntryRecent: 12
+        # Subagents have their own session logs. This USED TO BE false, on the
+        # theory that their work already reaches the tree through the parent's
+        # tool calls — measured 2026-09-30 and it does not: the parent logs only
+        # its own turns, so a delegated child's whole session (272 events, the
+        # local-model / embedding investigation) left nothing in the tree.
+        #
+        # NOTE: this file is the LIVE source of these values. The plugin's
+        # DEFAULT_CONFIG is only a fallback — changing it in code alone does NOT
+        # change the running behaviour (learned the hard way: it stayed false).
+        includeSubagents: true
+
+        # ── automatic summarisation (P1, 2026-09-30) ────────────────────────
+        # Master switch for the automatic snapshots (pressure / compaction /
+        # turn-count). false stops every automatic model call while the
+        # mechanical turn log keeps recording; the memory_auto tool flips it at
+        # runtime (a restart returns to this value).
+        autoSummary: true
+
+        # ── local recall router (P0, 2026-09-30) ────────────────────────────
+        # Scores the human's message against an offline corpus of past turns with
+        # a local embedding model and injects the candidate days, so the agent
+        # can go read them and judge for itself. ~5 ms per turn, tens of MB
+        # resident. See the Recall section of README.md for the limits.
+        router: true
+        routerBaseUrl: 'http://127.0.0.1:1234'
+        routerModel: text-embedding-bge-small-zh-v1.5
+        routerIndex: ''
+        routerCorpus: ''
+        routerDataDir: ''
+        # 20 (was 12), measured 2026-10-10 on 47 turns with a known answer.
+        # This is a ROW count, not a day count: the note merges rows by date, and a busy day
+        # occupies several rows, so 20 rows yield ~9 distinct days (median) — and that already
+        # covers 47/47 = 100% of the known-answer turns. Raising it further (30/40/120) adds
+        # rows but no coverage and no new days beyond ~11, so 20 is the knee.
+        # Cost of the extra 8 rows: ~8 lines x ~45 chars ≈ 360 chars in the injected note.
+        # (At 12 the same sample sat at 44/47 = 93.6%.)
+        routerTopK: 20
+        # Measured on a 45-query synthetic set whose answers are known (2026-10-02, see
+        # offline synthetic set): at lambda 0.005, minCos 0.60 puts the right date in the note
+        # 31/33 times (94%) with 1/8 false alarms on questions that have no answer at all.
+        # 0.70 scored 24/33 (73%) with the SAME false-alarm rate => 0.60 is strictly better.
+        # (It was raised to 0.70 earlier today on 4/4 wrong injections — but those were all
+        # context-only turns, which routerSkipContextOnly now removes before the gate.)
+        # Two channels, two bars (2026-10-03): the NOTE goes to the agent and wants recall, so
+        # its bar is low (0.45 — background is welcome); the CARD asks the human to judge, so its
+        # bar is high (routerPickFloor 0.60 — ask rarely). A message with a topic that is not a
+        # memory question (present state / action request) gets the note but never the card.
+        routerMinCos: 0.60
+        # Client hot-reload: the boot-time inline script also pulls a fresh copy from
+        # /dsh-memory/client.js and takes over when its rev is higher => client edits need no restart.
+        clientHotReload: true
+        # 7 was wrong by measurement (2026-10-02): the corpus has 260 rows within 7 days and
+        # **265 rows in the 7-30 day band** — that half was never even a candidate, and every
+        # card the human saw offered only the last ~3 days. With lambda at 0.005 the window is
+        # nearly free (it only decides admission), so 92 = three months (asked 2026-10-02).
+        # Today it changes nothing (the tree only goes back to 2026-09-13); it is future-proofing.
+        routerMaxDays: 92
+        # Only offer a card when the best candidate clears this; 0.4 (was 0.5) asks a bit more
+        # often, and the extra rows are the hard negatives the re-ranker needs most.
+        routerPickFloor: 0.65
+        # Context-only turns ("继续", "重启了") have no recallable answer: any hit is noise.
+        # 159 of ~200 turns were context-only (2026-10-02) — this keeps them out of the data.
+        routerSkipContextOnly: true
+        # Date anchor (2026-10-02): if the message names a day AND that day is at least as
+        # relevant as the gate (0.60), put it first; if the message is essentially ONLY a date,
+        # the date is the sole clue and may inject on its own. The floor MUST match the gate:
+        # at 0.45 an incidental "9月18号我要出差，另外显卡…" hijacked the answer ✗.
+        routerDateAnchor: true
+        routerDateAnchorMinCos: 0.60
+        routerDateAnchorPureChars: 6
+        # 0.1/day was a WALL, not a tiebreaker. Swept on the same known-answer set (2026-10-02):
+        #   lambda   recall@1   recall@3   never found
+        #   0.005      82%        94%          1
+        #   0.02       61%        73%          7
+        #   0.05       36%        48%         17
+        #   0.10       21%        27%         23     <- what production was running
+        # 0.005 (half-life ~139 days) keeps recency as a whisper while letting old memories rank.
+        routerLambda: 0.005
+        routerMaxChars: 500
+        routerTimeoutMs: 120000
+        routerInject: true
+        routerMinGapTurns: 2
+        routerWarmup: true
+        routerKeepAliveMs: 300000
+
+        # Default truncation for memory_read.
+        readMaxChars: 24000
+
+        # When the human reaches back to earlier work ("上次", "我们讨论过",
+        # "last time"), append ONE reminder naming the memory tools. Phrase
+        # detection only — no model call, no file read. The reminder explicitly
+        # licenses the model to ignore it, so a borderline match costs one line
+        # instead of producing a confidently wrong answer.
+        reminderOn: true
+        # Turns to stay quiet after one reminder: a single turn has many steps,
+        # and the same phrase tends to repeat across the follow-up turn.
+        reminderMinGapTurns: 3
+
+        # Copy every image a turn produced into that day's media/ directory and
+        # refresh its index. The tree keeps its OWN copy on purpose: the harness
+        # attachment store is content-addressed and durable, but it belongs to
+        # the app, and the point of remembering is to outlive the app. Files
+        # deduplicate by sha256 prefix across the day, so one image mentioned by
+        # three turns costs one file and three index rows.
+        mediaArchive: true

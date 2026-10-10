@@ -1,0 +1,13 @@
+node_modules/
+.pnpm-store/
+
+# Test scratch: the suites create temp trees, and a stray copy inside the
+# package is exactly the accident the backup module guards against.
+_restore-test*/
+_tmp*/
+*.log
+
+# Local overrides — the profile's own patch layer is where deployment-specific
+# paths belong, never this file.
+cordis.local.yml
+.env

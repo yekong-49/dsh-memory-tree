@@ -1,0 +1,21 @@
+# Normalize line endings on commit, and check out LF everywhere.
+# A Windows clone with autocrlf would otherwise turn every source file into CRLF,
+# and this project's tests compare rendered text byte-for-byte in places ? a
+# silent CRLF can make a green suite fail on someone else's machine.
+* text=auto eol=lf
+
+# Binary assets must never be touched.
+*.onnx binary
+*.png  binary
+*.jpg  binary
+*.jpeg binary
+*.gif  binary
+*.webp binary
+*.ico  binary
+*.zip  binary
+*.zst  binary
+*.wasm binary
+
+# Keep these exactly as authored.
+*.bat  text eol=crlf
+*.cmd  text eol=crlf

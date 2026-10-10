@@ -1,0 +1,56 @@
+{
+  "name": "dsh-memory-tree",
+  "version": "0.1.0",
+  "description": "Cross-session memory for DeepSeek Harness agents: a lazily grown, time-layered tree (long-term / year / month / day / verbatim snapshot) with one mechanical line per turn, automatic snapshots on context pressure, two-call roll-up summarization, and five-level drill-down tools.",
+  "license": "MIT",
+  "type": "module",
+  "main": "lib/index.js",
+  "exports": {
+    ".": "./lib/index.js",
+    "./package.json": "./package.json"
+  },
+  "engines": {
+    "node": "^22.19.0 || >=24.0.0"
+  },
+  "files": [
+    "lib",
+    "scripts",
+    "cordis.patch.yml",
+    "README.md",
+    "TROUBLESHOOTING.md",
+    "LICENSE"
+  ],
+  "keywords": [
+    "deepseek-harness",
+    "dsh",
+    "dsh-plugin",
+    "memory",
+    "long-term-memory",
+    "summarization",
+    "context"
+  ],
+  "dsh": {
+    "bundle": {
+      "patch": "./cordis.patch.yml"
+    }
+  },
+  "scripts": {
+    "test": "node test/pure.mjs && node test/tree.mjs && node test/service.mjs && node test/apply.mjs && node test/router.mjs",
+    "test:pure": "node test/pure.mjs",
+    "test:tree": "node test/tree.mjs",
+    "test:service": "node test/service.mjs",
+    "test:apply": "node test/apply.mjs",
+    "test:router": "node test/router.mjs",
+    "precheck": "node test/loader-precheck.mjs",
+    "verify": "npm test && node test/loader-precheck.mjs"
+  },
+  "dependencies": {
+    "@huggingface/transformers": "^4.3.0"
+  },
+  "pnpm": {
+    "onlyBuiltDependencies": [
+      "onnxruntime-node",
+      "protobufjs"
+    ]
+  }
+}
